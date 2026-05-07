@@ -1,0 +1,28 @@
+schema_version = "1.0.0"
+
+id = "sculpt_timelapse_capture"
+version = "0.3.0"
+name = "Sculpt Timelapse Capture"
+tagline = "Capture portable viewport timelapse sessions"
+maintainer = "Colin"
+type = "add-on"
+
+blender_version_min = "5.1.0"
+license = [
+  "SPDX:GPL-3.0-or-later",
+]
+tags = [
+  "3D View",
+  "Animation",
+  "Render",
+]
+
+[permissions]
+files = "Save timelapse frames to user selected folders"
+
+[build]
+paths = [
+  "__init__.py",
+  "README.md",
+  "encode_timelapse.ps1",
+]

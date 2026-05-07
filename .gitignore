@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Blender extension build output
+*.zip
+
+# Local capture output
+timelapse_sessions/
+timelapse_frames/
+session.json
+frame_*.jpg
+frame_*.png
+timelapse.mp4
+
+# Blender local files
+*.blend1
+*.blend2
+*.blend@
+*.blend[0-9]*
+
+# Editor and OS files
+.vscode/
+.idea/
+Thumbs.db
+Desktop.ini
+.DS_Store
