@@ -350,7 +350,7 @@ class SCT_OT_start_capture(Operator):
             self._finish(context)
             return {"CANCELLED"}
 
-        if event.type != "TIMER" or event.timer != self._timer:
+        if event.type != "TIMER":
             return {"PASS_THROUGH"}
 
         now = time.monotonic()

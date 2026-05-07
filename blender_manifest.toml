@@ -1,7 +1,7 @@
 schema_version = "1.0.0"
 
 id = "sculpt_timelapse_capture"
-version = "0.3.0"
+version = "0.3.1"
 name = "Sculpt Timelapse Capture"
 tagline = "Capture portable viewport timelapse sessions"
 maintainer = "Colin"

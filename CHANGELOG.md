@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.1
+
+- Fixed Blender 5.1 modal timer compatibility when `Event.timer` is unavailable.
+
 ## 0.3.0
 
 - Added project/session folder organization.
