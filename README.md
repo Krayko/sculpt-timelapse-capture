@@ -20,12 +20,15 @@ timelapse_sessions/
 
 ## Blender Usage
 
-1. Install the extension zip in Blender with `Edit > Preferences > Add-ons > Install from Disk`.
-2. Enable **Sculpt Timelapse Capture**.
-3. Optional: set global defaults in the add-on preferences.
-4. Open the 3D View sidebar with `N`.
-5. Use the **Timelapse** tab to set the project, session name, root folder, interval, and image format.
-6. Click **Start Capture** before sculpting and **Stop Capture** when finished.
+1. Download the release zip from GitHub Releases.
+2. Install the extension zip in Blender with `Edit > Preferences > Add-ons > Install from Disk`.
+3. Enable **Sculpt Timelapse Capture**.
+4. Optional: set global defaults in the add-on preferences.
+5. Open the 3D View sidebar with `N`.
+6. Use the **Timelapse** tab to set the project, session name, root folder, interval, and image format.
+7. Click **Start Capture** before sculpting and **Stop Capture** when finished.
+
+Use the release asset named like `sculpt_timelapse_capture-0.3.0.zip`. Do not use GitHub's green **Code > Download ZIP** button for installation; that downloads the source repository, not the packaged Blender extension.
 
 JPEG is the default because it keeps 4-12 hour sessions manageable on disk. PNG is available when you need lossless source frames.
 
@@ -52,6 +55,19 @@ The script reads `session.json` to detect JPG/PNG and recommended FPS. Optional 
 - `-Output "D:\Videos\face_sculpt.mp4"`
 - `-FfmpegPath "C:\ffmpeg\bin\ffmpeg.exe"`
 - `-NoOverwrite`
+
+By default, the encoded video is saved as `timelapse.mp4` in the same session folder as the captured frames:
+
+```text
+timelapse_sessions/
+  Face_Sculpt/
+    2026-05-06_203000_blockout/
+      frame_000001.jpg
+      session.json
+      timelapse.mp4
+```
+
+Use `-Output` to save the video somewhere else.
 
 ## Development
 
