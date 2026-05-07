@@ -28,9 +28,33 @@ timelapse_sessions/
 6. Use the **Timelapse** tab to set the project, session name, root folder, interval, and image format.
 7. Click **Start Capture** before sculpting and **Stop Capture** when finished.
 
-Use the release asset named like `sculpt_timelapse_capture-0.3.0.zip`. Do not use GitHub's green **Code > Download ZIP** button for installation; that downloads the source repository, not the packaged Blender extension.
+Use the release asset named like `sculpt_timelapse_capture-0.3.1.zip`. Do not use GitHub's green **Code > Download ZIP** button for installation; that downloads the source repository, not the packaged Blender extension.
 
 JPEG is the default because it keeps 4-12 hour sessions manageable on disk. PNG is available when you need lossless source frames.
+
+## Root Folder
+
+The **Root Folder** setting is the top-level library where the add-on creates project and session folders. Frames are not saved directly into the root folder.
+
+For example, if Root Folder is:
+
+```text
+D:\Blender Timelapses
+```
+
+and Project is `Face Sculpt` with Session `blockout`, the add-on creates:
+
+```text
+D:\Blender Timelapses\
+  Face_Sculpt\
+    2026-05-06_203000_blockout\
+      frame_000001.jpg
+      frame_000002.jpg
+      session.json
+      encode_timelapse.ps1
+```
+
+Use one shared Root Folder if you want all timelapses organized in one place across multiple `.blend` files and projects. Use a project-specific Root Folder if you want captures stored beside a particular project.
 
 ## Encoding
 
