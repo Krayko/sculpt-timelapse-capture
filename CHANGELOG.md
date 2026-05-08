@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.0
+
+- Added idle-aware capture pause with a 30 second default threshold.
+- Added capture source selection for active 3D View or scene camera.
+- Prefilled project and session fields with contextual defaults.
+- Replaced separate file format and JPEG quality controls with JPG 80%, JPG 90%, and PNG presets.
+
 ## 0.3.2
 
 - Fixed stale operator references after Blender removes modal operator RNA data.

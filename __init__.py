@@ -24,6 +24,27 @@ def _extension_for_format(image_format):
     return ".png" if image_format == "PNG" else ".jpg"
 
 
+def _image_format_for_quality(image_quality):
+    return "PNG" if image_quality == "PNG" else "JPEG"
+
+
+def _jpeg_quality_for_quality(image_quality):
+    if image_quality == "JPG_80":
+        return 80
+    if image_quality == "JPG_90":
+        return 90
+    return None
+
+
+def _image_quality_label(image_quality):
+    labels = {
+        "JPG_80": "JPG 80%",
+        "JPG_90": "JPG 90%",
+        "PNG": "PNG",
+    }
+    return labels.get(image_quality, image_quality)
+
+
 def _slug(value, fallback):
     cleaned = re.sub(r"[^A-Za-z0-9._ -]+", "", value or "").strip()
     cleaned = re.sub(r"\s+", " ", cleaned).replace(" ", "_")
@@ -52,8 +73,20 @@ def _effective_project_name(settings):
     return settings.project_name.strip() or _default_project_name()
 
 
+def _effective_session_name(settings):
+    return settings.session_name.strip() or "sculpt_session"
+
+
+def _ensure_session_defaults(settings):
+    if not settings.project_name.strip():
+        settings.project_name = _default_project_name()
+    if not settings.session_name.strip():
+        settings.session_name = "sculpt_session"
+
+
 def _session_metadata(context, settings, ended_at=None):
-    image_format = settings.image_format
+    image_format = _image_format_for_quality(settings.image_quality)
+    jpeg_quality = _jpeg_quality_for_quality(settings.image_quality)
     extension = _extension_for_format(image_format).lstrip(".")
     session_path = Path(settings.session_dir)
 
@@ -70,10 +103,16 @@ def _session_metadata(context, settings, ended_at=None):
         "first_frame": f"frame_000001.{extension}",
         "frame_count": settings.frame_count,
         "interval_seconds": settings.interval_seconds,
+        "capture_source": settings.capture_source,
         "image_format": image_format,
+        "image_quality": settings.image_quality,
+        "image_quality_label": _image_quality_label(settings.image_quality),
         "file_extension": extension,
-        "jpeg_quality": settings.jpeg_quality if image_format == "JPEG" else None,
+        "jpeg_quality": jpeg_quality,
         "hide_overlays": settings.hide_overlays,
+        "pause_while_idle": settings.pause_while_idle,
+        "idle_threshold_seconds": settings.idle_threshold_seconds,
+        "skipped_idle_captures": settings.skipped_idle_captures,
         "recommended_fps": settings.recommended_fps,
         "recommended_output": "timelapse.mp4",
         "blender_version": bpy.app.version_string,
@@ -115,6 +154,16 @@ def _find_view3d_context(window):
     return None
 
 
+def _is_activity_event(event):
+    if event.type in {"TIMER", "NONE"}:
+        return False
+    if event.type in {"MOUSEMOVE", "INBETWEEN_MOUSEMOVE", "TRACKPADPAN", "TRACKPADZOOM"}:
+        return True
+    if getattr(event, "value", None) in {"PRESS", "RELEASE", "CLICK", "DOUBLE_CLICK", "CLICK_DRAG"}:
+        return True
+    return False
+
+
 class SCT_AddonPreferences(AddonPreferences):
     bl_idname = ADDON_ID
 
@@ -132,26 +181,42 @@ class SCT_AddonPreferences(AddonPreferences):
         soft_max=120.0,
         unit="TIME",
     )
-    default_image_format: EnumProperty(
-        name="Default Format",
-        description="Default image format for captured frames",
+    default_image_quality: EnumProperty(
+        name="Default Image Quality",
+        description="Default quality preset for captured frames",
         items=(
-            ("JPEG", "JPEG", "Small files, best default for long sessions"),
+            ("JPG_80", "JPG 80%", "Small files for very long sessions"),
+            ("JPG_90", "JPG 90%", "Balanced default for sculpt timelapses"),
             ("PNG", "PNG", "Lossless frames with larger files"),
         ),
-        default="JPEG",
+        default="JPG_90",
     )
-    default_jpeg_quality: IntProperty(
-        name="Default JPEG Quality",
-        description="Default JPEG quality for captured frames",
-        default=90,
-        min=1,
-        max=100,
+    default_capture_source: EnumProperty(
+        name="Default Capture Source",
+        description="Default source for captured frames",
+        items=(
+            ("VIEW", "Active View", "Capture the current 3D View"),
+            ("CAMERA", "Scene Camera", "Capture from the active scene camera"),
+        ),
+        default="VIEW",
     )
     default_hide_overlays: BoolProperty(
         name="Hide Overlays by Default",
         description="Temporarily hide viewport overlays while each frame is captured",
         default=True,
+    )
+    default_pause_while_idle: BoolProperty(
+        name="Pause While Idle",
+        description="Skip captures when no Blender input has been seen recently",
+        default=True,
+    )
+    default_idle_threshold_seconds: FloatProperty(
+        name="Idle After",
+        description="Seconds of no Blender input before capture pauses",
+        default=30.0,
+        min=5.0,
+        soft_max=600.0,
+        unit="TIME",
     )
     default_recommended_fps: IntProperty(
         name="Recommended Encode FPS",
@@ -170,10 +235,12 @@ class SCT_AddonPreferences(AddonPreferences):
         layout = self.layout
         layout.prop(self, "default_output_root")
         layout.prop(self, "default_interval_seconds")
-        layout.prop(self, "default_image_format")
-        if self.default_image_format == "JPEG":
-            layout.prop(self, "default_jpeg_quality")
+        layout.prop(self, "default_image_quality")
+        layout.prop(self, "default_capture_source")
         layout.prop(self, "default_hide_overlays")
+        layout.prop(self, "default_pause_while_idle")
+        if self.default_pause_while_idle:
+            layout.prop(self, "default_idle_threshold_seconds")
         layout.prop(self, "default_recommended_fps")
         layout.prop(self, "copy_encoder_script")
 
@@ -181,12 +248,12 @@ class SCT_AddonPreferences(AddonPreferences):
 class SCT_Settings(PropertyGroup):
     project_name: StringProperty(
         name="Project",
-        description="Project folder name. Leave blank to use the blend file name",
+        description="Project folder name",
         default="",
     )
     session_name: StringProperty(
         name="Session",
-        description="Optional label added to this capture session folder",
+        description="Label added to this capture session folder",
         default="",
     )
     output_root: StringProperty(
@@ -203,26 +270,47 @@ class SCT_Settings(PropertyGroup):
         soft_max=120.0,
         unit="TIME",
     )
-    image_format: EnumProperty(
-        name="Format",
-        description="Image format for captured frames",
+    image_quality: EnumProperty(
+        name="Image Quality",
+        description="Quality preset for captured frames",
         items=(
-            ("JPEG", "JPEG", "Small files, best default for long sessions"),
+            ("JPG_80", "JPG 80%", "Small files for very long sessions"),
+            ("JPG_90", "JPG 90%", "Balanced default for sculpt timelapses"),
             ("PNG", "PNG", "Lossless frames with larger files"),
         ),
-        default="JPEG",
+        default="JPG_90",
     )
-    jpeg_quality: IntProperty(
-        name="JPEG Quality",
-        description="JPEG quality for captured frames",
-        default=90,
-        min=1,
-        max=100,
+    capture_source: EnumProperty(
+        name="Capture Source",
+        description="Source used for captured frames",
+        items=(
+            ("VIEW", "Active View", "Capture the current 3D View"),
+            ("CAMERA", "Scene Camera", "Capture from the active scene camera"),
+        ),
+        default="VIEW",
     )
     hide_overlays: BoolProperty(
         name="Hide Overlays",
         description="Temporarily hide viewport overlays while each frame is captured",
         default=True,
+    )
+    pause_while_idle: BoolProperty(
+        name="Pause While Idle",
+        description="Skip captures when no Blender input has been seen recently",
+        default=True,
+    )
+    idle_threshold_seconds: FloatProperty(
+        name="Idle After",
+        description="Seconds of no Blender input before capture pauses",
+        default=30.0,
+        min=5.0,
+        soft_max=600.0,
+        unit="TIME",
+    )
+    skipped_idle_captures: IntProperty(
+        name="Idle Skips",
+        default=0,
+        min=0,
     )
     recommended_fps: IntProperty(
         name="Encode FPS",
@@ -266,11 +354,14 @@ class SCT_OT_apply_preferences_defaults(Operator):
         if prefs is None:
             return {"CANCELLED"}
 
+        _ensure_session_defaults(settings)
         settings.output_root = prefs.default_output_root
         settings.interval_seconds = prefs.default_interval_seconds
-        settings.image_format = prefs.default_image_format
-        settings.jpeg_quality = prefs.default_jpeg_quality
+        settings.image_quality = prefs.default_image_quality
+        settings.capture_source = prefs.default_capture_source
         settings.hide_overlays = prefs.default_hide_overlays
+        settings.pause_while_idle = prefs.default_pause_while_idle
+        settings.idle_threshold_seconds = prefs.default_idle_threshold_seconds
         settings.recommended_fps = prefs.default_recommended_fps
         settings.status = "Defaults applied"
         return {"FINISHED"}
@@ -284,18 +375,24 @@ class SCT_OT_start_capture(Operator):
 
     _timer = None
     _next_capture = 0.0
+    _last_activity = 0.0
+    _was_idle = False
 
     def invoke(self, context, event):
         settings = context.scene.sct_settings
         prefs = _addon_preferences(context)
+        _ensure_session_defaults(settings)
 
         if settings.is_running:
             self.report({"WARNING"}, "Timelapse capture is already running")
             return {"CANCELLED"}
 
-        view_context = _find_view3d_context(context.window)
-        if view_context is None:
+        if settings.capture_source == "VIEW" and _find_view3d_context(context.window) is None:
             self.report({"ERROR"}, "Open a 3D View before starting capture")
+            return {"CANCELLED"}
+
+        if settings.capture_source == "CAMERA" and context.scene.camera is None:
+            self.report({"ERROR"}, "Scene Camera capture requires an active scene camera")
             return {"CANCELLED"}
 
         root_value = settings.output_root or (prefs.default_output_root if prefs else "//timelapse_sessions")
@@ -303,7 +400,7 @@ class SCT_OT_start_capture(Operator):
         project_name = _effective_project_name(settings)
         project_slug = _slug(project_name, "Untitled_Project")
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H%M%S")
-        session_slug = _slug(settings.session_name, "capture")
+        session_slug = _slug(_effective_session_name(settings), "sculpt_session")
         session_dir = output_root / project_slug / f"{timestamp}_{session_slug}"
 
         try:
@@ -316,9 +413,10 @@ class SCT_OT_start_capture(Operator):
             return {"CANCELLED"}
 
         settings.frame_count = 0
+        settings.skipped_idle_captures = 0
         settings.session_dir = str(session_dir)
         settings.active_project_name = project_name
-        settings.active_session_name = settings.session_name.strip() or "capture"
+        settings.active_session_name = _effective_session_name(settings)
         settings.started_at = _now_iso()
         settings.is_running = True
         settings.status = "Capturing"
@@ -334,23 +432,40 @@ class SCT_OT_start_capture(Operator):
             return {"CANCELLED"}
 
         self._next_capture = 0.0
+        self._last_activity = time.monotonic()
+        self._was_idle = False
         self._timer = context.window_manager.event_timer_add(1.0, window=context.window)
         context.window_manager.modal_handler_add(self)
 
         return {"RUNNING_MODAL"}
 
     def modal(self, context, event):
-        if not context.scene.sct_settings.is_running:
+        settings = context.scene.sct_settings
+        if not settings.is_running:
             self._finish(context)
             return {"CANCELLED"}
 
         if event.type != "TIMER":
+            if _is_activity_event(event):
+                self._last_activity = time.monotonic()
+                if self._was_idle:
+                    self._next_capture = 0.0
+                    self._was_idle = False
+                    settings.status = "Capturing"
             return {"PASS_THROUGH"}
 
         now = time.monotonic()
         if now >= self._next_capture:
+            if settings.pause_while_idle and now - self._last_activity >= settings.idle_threshold_seconds:
+                settings.skipped_idle_captures += 1
+                settings.status = "Idle; capture paused"
+                self._was_idle = True
+                self._next_capture = now + settings.interval_seconds
+                _write_session_metadata(context, settings)
+                return {"PASS_THROUGH"}
+
             self._capture_frame(context)
-            self._next_capture = now + context.scene.sct_settings.interval_seconds
+            self._next_capture = now + settings.interval_seconds
 
         return {"PASS_THROUGH"}
 
@@ -366,14 +481,20 @@ class SCT_OT_start_capture(Operator):
 
     def _capture_frame(self, context):
         settings = context.scene.sct_settings
-        view_context = _find_view3d_context(context.window)
-        if view_context is None:
-            settings.status = "No 3D View found"
+        view_context = None
+        if settings.capture_source == "VIEW":
+            view_context = _find_view3d_context(context.window)
+            if view_context is None:
+                settings.status = "No 3D View found"
+                return
+        elif context.scene.camera is None:
+            settings.status = "No scene camera found"
             return
 
-        area, region, space = view_context
         frame_number = settings.frame_count + 1
-        extension = _extension_for_format(settings.image_format)
+        image_format = _image_format_for_quality(settings.image_quality)
+        jpeg_quality = _jpeg_quality_for_quality(settings.image_quality)
+        extension = _extension_for_format(image_format)
         filepath = os.path.join(settings.session_dir, f"frame_{frame_number:06d}{extension}")
 
         render = context.scene.render
@@ -381,19 +502,25 @@ class SCT_OT_start_capture(Operator):
         previous_filepath = render.filepath
         previous_format = image_settings.file_format
         previous_quality = image_settings.quality
-        previous_overlays = space.overlay.show_overlays
+        previous_overlays = None
 
         try:
             render.filepath = filepath
-            image_settings.file_format = settings.image_format
-            if settings.image_format == "JPEG":
-                image_settings.quality = settings.jpeg_quality
+            image_settings.file_format = image_format
+            if image_format == "JPEG" and jpeg_quality is not None:
+                image_settings.quality = jpeg_quality
 
-            if settings.hide_overlays:
-                space.overlay.show_overlays = False
+            if settings.capture_source == "VIEW":
+                area, region, space = view_context
+                previous_overlays = space.overlay.show_overlays
 
-            with context.temp_override(window=context.window, screen=context.screen, area=area, region=region):
-                bpy.ops.render.opengl(write_still=True, view_context=True)
+                if settings.hide_overlays:
+                    space.overlay.show_overlays = False
+
+                with context.temp_override(window=context.window, screen=context.screen, area=area, region=region):
+                    bpy.ops.render.opengl(write_still=True, view_context=True)
+            else:
+                bpy.ops.render.opengl(write_still=True, view_context=False)
 
             settings.frame_count = frame_number
             settings.status = f"Captured {frame_number} frame{'s' if frame_number != 1 else ''}"
@@ -405,7 +532,8 @@ class SCT_OT_start_capture(Operator):
             render.filepath = previous_filepath
             image_settings.file_format = previous_format
             image_settings.quality = previous_quality
-            space.overlay.show_overlays = previous_overlays
+            if settings.capture_source == "VIEW" and previous_overlays is not None:
+                space.overlay.show_overlays = previous_overlays
 
 
 class SCT_OT_stop_capture(Operator):
@@ -445,12 +573,12 @@ class SCT_PT_panel(Panel):
 
         layout.separator()
         layout.prop(settings, "interval_seconds")
-        layout.prop(settings, "image_format", expand=True)
-
-        if settings.image_format == "JPEG":
-            layout.prop(settings, "jpeg_quality")
-
+        layout.prop(settings, "image_quality")
+        layout.prop(settings, "capture_source")
         layout.prop(settings, "hide_overlays")
+        layout.prop(settings, "pause_while_idle")
+        if settings.pause_while_idle:
+            layout.prop(settings, "idle_threshold_seconds")
         layout.prop(settings, "recommended_fps")
 
         row = layout.row(align=True)
@@ -464,6 +592,8 @@ class SCT_PT_panel(Panel):
         layout.separator()
         layout.label(text=f"Status: {settings.status}")
         layout.label(text=f"Frames: {settings.frame_count}")
+        if settings.skipped_idle_captures:
+            layout.label(text=f"Idle skips: {settings.skipped_idle_captures}")
         if settings.session_dir:
             layout.prop(settings, "session_dir", text="Folder")
 
@@ -482,6 +612,8 @@ def register():
     for cls in classes:
         bpy.utils.register_class(cls)
     bpy.types.Scene.sct_settings = PointerProperty(type=SCT_Settings)
+    for scene in bpy.data.scenes:
+        _ensure_session_defaults(scene.sct_settings)
 
 
 def unregister():
