@@ -4,7 +4,6 @@ import os
 import re
 import shutil
 import time
-import uuid
 from pathlib import Path
 
 import bpy
@@ -128,14 +127,12 @@ def _session_metadata(context, settings, ended_at=None):
         "first_frame": f"frame_000001.{extension}",
         "frame_count": settings.frame_count,
         "interval_seconds": settings.interval_seconds,
-        "capture_method": "viewport_screenshot",
+        "capture_method": "opengl_view_context",
         "image_format": image_format,
         "image_quality": settings.image_quality,
         "image_quality_label": _image_quality_label(settings.image_quality),
         "file_extension": extension,
         "jpeg_quality": jpeg_quality,
-        "defer_during_input": settings.defer_during_input,
-        "input_settle_seconds": settings.input_settle_seconds,
         "pause_while_idle": settings.pause_while_idle,
         "idle_threshold_seconds": settings.idle_threshold_seconds,
         "skipped_idle_captures": settings.skipped_idle_captures,
@@ -180,41 +177,6 @@ def _find_view3d_context(window):
     return None
 
 
-def _flush_viewport_updates(context):
-    context.view_layer.update()
-
-
-def _save_viewport_screenshot(context, area, region, filepath, image_format, jpeg_quality):
-    filepath = Path(filepath)
-    temp_filepath = filepath.with_name(f".{filepath.stem}_{uuid.uuid4().hex}.png")
-
-    with context.temp_override(window=context.window, screen=context.screen, area=area, region=region):
-        bpy.ops.screen.screenshot(filepath=str(temp_filepath), hide_props_region=True, check_existing=False)
-
-    if image_format == "PNG":
-        temp_filepath.replace(filepath)
-        return
-
-    image = bpy.data.images.load(str(temp_filepath), check_existing=False)
-    image_settings = context.scene.render.image_settings
-    previous_format = image_settings.file_format
-    previous_quality = image_settings.quality
-
-    try:
-        image_settings.file_format = image_format
-        if jpeg_quality is not None:
-            image_settings.quality = jpeg_quality
-        image.save_render(str(filepath), scene=context.scene)
-    finally:
-        bpy.data.images.remove(image)
-        image_settings.file_format = previous_format
-        image_settings.quality = previous_quality
-        try:
-            temp_filepath.unlink()
-        except OSError:
-            pass
-
-
 def _is_activity_event(event):
     if event.type in {"TIMER", "NONE"}:
         return False
@@ -223,14 +185,6 @@ def _is_activity_event(event):
     if getattr(event, "value", None) in {"PRESS", "RELEASE", "CLICK", "DOUBLE_CLICK", "CLICK_DRAG"}:
         return True
     return False
-
-
-def _is_input_start_event(event):
-    return getattr(event, "value", None) in {"PRESS", "CLICK", "DOUBLE_CLICK", "CLICK_DRAG"}
-
-
-def _is_input_end_event(event):
-    return getattr(event, "value", None) == "RELEASE"
 
 
 class SCT_AddonPreferences(AddonPreferences):
@@ -265,19 +219,6 @@ class SCT_AddonPreferences(AddonPreferences):
         description="Skip captures when no Blender input has been seen recently",
         default=True,
     )
-    default_defer_during_input: BoolProperty(
-        name="Defer During Input",
-        description="Wait until sculpt/navigation input settles before capturing",
-        default=True,
-    )
-    default_input_settle_seconds: FloatProperty(
-        name="Input Settle",
-        description="Seconds to wait after recent input before capturing",
-        default=1.0,
-        min=0.0,
-        soft_max=5.0,
-        unit="TIME",
-    )
     default_idle_threshold_seconds: FloatProperty(
         name="Idle After",
         description="Seconds of no Blender input before capture pauses",
@@ -304,9 +245,6 @@ class SCT_AddonPreferences(AddonPreferences):
         layout.prop(self, "default_output_root")
         layout.prop(self, "default_interval_seconds")
         layout.prop(self, "default_image_quality")
-        layout.prop(self, "default_defer_during_input")
-        if self.default_defer_during_input:
-            layout.prop(self, "default_input_settle_seconds")
         layout.prop(self, "default_pause_while_idle")
         if self.default_pause_while_idle:
             layout.prop(self, "default_idle_threshold_seconds")
@@ -353,19 +291,6 @@ class SCT_Settings(PropertyGroup):
         name="Pause While Idle",
         description="Skip captures when no Blender input has been seen recently",
         default=True,
-    )
-    defer_during_input: BoolProperty(
-        name="Defer During Input",
-        description="Wait until sculpt/navigation input settles before capturing",
-        default=True,
-    )
-    input_settle_seconds: FloatProperty(
-        name="Input Settle",
-        description="Seconds to wait after recent input before capturing",
-        default=1.0,
-        min=0.0,
-        soft_max=5.0,
-        unit="TIME",
     )
     idle_threshold_seconds: FloatProperty(
         name="Idle After",
@@ -426,8 +351,6 @@ class SCT_OT_apply_preferences_defaults(Operator):
         settings.output_root = prefs.default_output_root
         settings.interval_seconds = prefs.default_interval_seconds
         settings.image_quality = prefs.default_image_quality
-        settings.defer_during_input = prefs.default_defer_during_input
-        settings.input_settle_seconds = prefs.default_input_settle_seconds
         settings.pause_while_idle = prefs.default_pause_while_idle
         settings.idle_threshold_seconds = prefs.default_idle_threshold_seconds
         settings.recommended_fps = prefs.default_recommended_fps
@@ -444,7 +367,6 @@ class SCT_OT_start_capture(Operator):
     _timer = None
     _next_capture = 0.0
     _last_activity = 0.0
-    _input_active = False
     _was_idle = False
 
     def invoke(self, context, event):
@@ -498,7 +420,6 @@ class SCT_OT_start_capture(Operator):
 
         self._next_capture = 0.0
         self._last_activity = time.monotonic()
-        self._input_active = False
         self._was_idle = False
         self._timer = context.window_manager.event_timer_add(1.0, window=context.window)
         context.window_manager.modal_handler_add(self)
@@ -514,10 +435,6 @@ class SCT_OT_start_capture(Operator):
         if event.type != "TIMER":
             if _is_activity_event(event):
                 self._last_activity = time.monotonic()
-                if _is_input_start_event(event):
-                    self._input_active = True
-                elif _is_input_end_event(event):
-                    self._input_active = False
                 if self._was_idle:
                     self._next_capture = 0.0
                     self._was_idle = False
@@ -526,14 +443,6 @@ class SCT_OT_start_capture(Operator):
 
         now = time.monotonic()
         if now >= self._next_capture:
-            seconds_since_input = now - self._last_activity
-            if settings.defer_during_input and (
-                self._input_active or seconds_since_input < settings.input_settle_seconds
-            ):
-                settings.status = "Waiting for input pause"
-                self._next_capture = now + 0.5
-                return {"PASS_THROUGH"}
-
             if settings.pause_while_idle and now - self._last_activity >= settings.idle_threshold_seconds:
                 settings.skipped_idle_captures += 1
                 settings.status = "Idle; capture paused"
@@ -571,10 +480,20 @@ class SCT_OT_start_capture(Operator):
         filepath = os.path.join(settings.session_dir, f"frame_{frame_number:06d}{extension}")
 
         area, region, _space = view_context
+        render = context.scene.render
+        image_settings = render.image_settings
+        previous_filepath = render.filepath
+        previous_format = image_settings.file_format
+        previous_quality = image_settings.quality
 
         try:
-            _flush_viewport_updates(context)
-            _save_viewport_screenshot(context, area, region, filepath, image_format, jpeg_quality)
+            render.filepath = filepath
+            image_settings.file_format = image_format
+            if image_format == "JPEG" and jpeg_quality is not None:
+                image_settings.quality = jpeg_quality
+
+            with context.temp_override(window=context.window, screen=context.screen, area=area, region=region):
+                bpy.ops.render.opengl(write_still=True, view_context=True)
 
             settings.frame_count = frame_number
             settings.status = f"Captured {frame_number} frame{'s' if frame_number != 1 else ''}"
@@ -582,6 +501,10 @@ class SCT_OT_start_capture(Operator):
         except Exception as exc:
             settings.status = f"Capture failed: {exc}"
             self.report({"ERROR"}, settings.status)
+        finally:
+            render.filepath = previous_filepath
+            image_settings.file_format = previous_format
+            image_settings.quality = previous_quality
 
 
 class SCT_OT_stop_capture(Operator):
@@ -622,9 +545,6 @@ class SCT_PT_panel(Panel):
         layout.separator()
         layout.prop(settings, "interval_seconds")
         layout.prop(settings, "image_quality")
-        layout.prop(settings, "defer_during_input")
-        if settings.defer_during_input:
-            layout.prop(settings, "input_settle_seconds")
         layout.prop(settings, "pause_while_idle")
         if settings.pause_while_idle:
             layout.prop(settings, "idle_threshold_seconds")

@@ -28,7 +28,7 @@ timelapse_sessions/
 6. Use the **Timelapse** tab to set the project, session name, root folder, interval, and image format.
 7. Click **Start Capture** before sculpting and **Stop Capture** when finished.
 
-Use the release asset named like `sculpt_timelapse_capture-0.5.2.zip`. Do not use GitHub's green **Code > Download ZIP** button for installation; that downloads the source repository, not the packaged Blender extension.
+Use the release asset named like `sculpt_timelapse_capture-0.5.3.zip`. Do not use GitHub's green **Code > Download ZIP** button for installation; that downloads the source repository, not the packaged Blender extension.
 
 Project and Session are prefilled with contextual defaults. Project uses the current `.blend` file name when available, and Session defaults to `sculpt_session`.
 
@@ -38,9 +38,7 @@ Image Quality has three presets:
 - `JPG 90%` for balanced default captures
 - `PNG` for lossless frames
 
-Frames are captured from the live active 3D View so Sculpt Mode progress is reflected in the saved images. The add-on preserves the viewport's current overlay and UI state instead of changing them during capture.
-
-Defer During Input is enabled by default. If the capture timer fires while the user is sculpting, dragging, or rotating the view, capture waits until input has been quiet for the configured settle time.
+Frames are captured from the active 3D View with Blender's OpenGL viewport render path.
 
 For a fixed-perspective timelapse, open a separate Blender window, set that window's 3D View to the desired angle, and start Sculpt Timelapse from that fixed viewport. You can keep sculpting in your main window while the second window provides the capture view.
 

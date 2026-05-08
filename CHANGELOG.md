@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.3
+
+- Restored the reliable 0.3.1 OpenGL viewport frame capture method.
+- Removed input-settle deferral and UI screenshot capture while preserving idle frame skipping.
+
 ## 0.5.2
 
 - Added input-settle deferral so captures wait until sculpt/navigation input pauses.
