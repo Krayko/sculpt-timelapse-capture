@@ -206,7 +206,7 @@ def _snapshot_region_view(region_3d):
         "view_rotation": region_3d.view_rotation.copy(),
         "view_distance": region_3d.view_distance,
         "view_camera_zoom": region_3d.view_camera_zoom,
-        "view_camera_offset": region_3d.view_camera_offset.copy(),
+        "view_camera_offset": tuple(region_3d.view_camera_offset),
     }
 
 
@@ -216,7 +216,8 @@ def _restore_region_view(region_3d, snapshot):
     region_3d.view_rotation = snapshot["view_rotation"]
     region_3d.view_distance = snapshot["view_distance"]
     region_3d.view_camera_zoom = snapshot["view_camera_zoom"]
-    region_3d.view_camera_offset = snapshot["view_camera_offset"]
+    region_3d.view_camera_offset[0] = snapshot["view_camera_offset"][0]
+    region_3d.view_camera_offset[1] = snapshot["view_camera_offset"][1]
 
 
 def _save_viewport_screenshot(context, area, region, filepath, image_format, jpeg_quality):

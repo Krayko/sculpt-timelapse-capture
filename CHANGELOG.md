@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.4
+
+- Fixed live viewport capture restore errors caused by Blender camera offset array properties.
+
 ## 0.4.3
 
 - Changed frame capture to use live 3D View screenshots instead of OpenGL scene renders.
