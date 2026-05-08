@@ -128,8 +128,6 @@ def _session_metadata(context, settings, ended_at=None):
         "first_frame": f"frame_000001.{extension}",
         "frame_count": settings.frame_count,
         "interval_seconds": settings.interval_seconds,
-        "capture_source": settings.capture_source,
-        "capture_camera": settings.capture_camera.name if settings.capture_camera else None,
         "capture_method": "viewport_screenshot",
         "image_format": image_format,
         "image_quality": settings.image_quality,
@@ -199,27 +197,6 @@ def _flush_viewport_updates(context, area):
         pass
 
 
-def _snapshot_region_view(region_3d):
-    return {
-        "view_perspective": region_3d.view_perspective,
-        "view_location": region_3d.view_location.copy(),
-        "view_rotation": region_3d.view_rotation.copy(),
-        "view_distance": region_3d.view_distance,
-        "view_camera_zoom": region_3d.view_camera_zoom,
-        "view_camera_offset": tuple(region_3d.view_camera_offset),
-    }
-
-
-def _restore_region_view(region_3d, snapshot):
-    region_3d.view_perspective = snapshot["view_perspective"]
-    region_3d.view_location = snapshot["view_location"]
-    region_3d.view_rotation = snapshot["view_rotation"]
-    region_3d.view_distance = snapshot["view_distance"]
-    region_3d.view_camera_zoom = snapshot["view_camera_zoom"]
-    region_3d.view_camera_offset[0] = snapshot["view_camera_offset"][0]
-    region_3d.view_camera_offset[1] = snapshot["view_camera_offset"][1]
-
-
 def _save_viewport_screenshot(context, area, region, filepath, image_format, jpeg_quality):
     filepath = Path(filepath)
     temp_filepath = filepath.with_name(f".{filepath.stem}_{uuid.uuid4().hex}.png")
@@ -261,23 +238,6 @@ def _is_activity_event(event):
     return False
 
 
-def _camera_object_poll(self, obj):
-    return obj is not None and obj.type == "CAMERA"
-
-
-def _selected_capture_camera(context, settings):
-    if settings.capture_camera and settings.capture_camera.type == "CAMERA":
-        return settings.capture_camera
-    if context.scene.camera and context.scene.camera.type == "CAMERA":
-        return context.scene.camera
-    return None
-
-
-def _ensure_capture_camera_default(context, settings):
-    if settings.capture_camera is None and context.scene.camera and context.scene.camera.type == "CAMERA":
-        settings.capture_camera = context.scene.camera
-
-
 class SCT_AddonPreferences(AddonPreferences):
     bl_idname = ADDON_ID
 
@@ -304,15 +264,6 @@ class SCT_AddonPreferences(AddonPreferences):
             ("PNG", "PNG", "Lossless frames with larger files"),
         ),
         default="JPG_90",
-    )
-    default_capture_source: EnumProperty(
-        name="Default Capture Source",
-        description="Default source for captured frames",
-        items=(
-            ("VIEW", "Active View", "Capture the current 3D View"),
-            ("CAMERA", "Scene Camera", "Capture from the selected scene camera"),
-        ),
-        default="VIEW",
     )
     default_hide_overlays: BoolProperty(
         name="Hide Overlays by Default",
@@ -350,7 +301,6 @@ class SCT_AddonPreferences(AddonPreferences):
         layout.prop(self, "default_output_root")
         layout.prop(self, "default_interval_seconds")
         layout.prop(self, "default_image_quality")
-        layout.prop(self, "default_capture_source")
         layout.prop(self, "default_hide_overlays")
         layout.prop(self, "default_pause_while_idle")
         if self.default_pause_while_idle:
@@ -393,21 +343,6 @@ class SCT_Settings(PropertyGroup):
             ("PNG", "PNG", "Lossless frames with larger files"),
         ),
         default="JPG_90",
-    )
-    capture_source: EnumProperty(
-        name="Capture Source",
-        description="Source used for captured frames",
-        items=(
-            ("VIEW", "Active View", "Capture the current 3D View"),
-            ("CAMERA", "Scene Camera", "Capture from the selected scene camera"),
-        ),
-        default="VIEW",
-    )
-    capture_camera: PointerProperty(
-        name="Camera",
-        description="Camera used when Capture Source is Scene Camera",
-        type=bpy.types.Object,
-        poll=_camera_object_poll,
     )
     hide_overlays: BoolProperty(
         name="Hide Overlays",
@@ -478,9 +413,6 @@ class SCT_OT_apply_preferences_defaults(Operator):
         settings.output_root = prefs.default_output_root
         settings.interval_seconds = prefs.default_interval_seconds
         settings.image_quality = prefs.default_image_quality
-        settings.capture_source = prefs.default_capture_source
-        if settings.capture_source == "CAMERA":
-            _ensure_capture_camera_default(context, settings)
         settings.hide_overlays = prefs.default_hide_overlays
         settings.pause_while_idle = prefs.default_pause_while_idle
         settings.idle_threshold_seconds = prefs.default_idle_threshold_seconds
@@ -509,15 +441,8 @@ class SCT_OT_start_capture(Operator):
             self.report({"WARNING"}, "Timelapse capture is already running")
             return {"CANCELLED"}
 
-        if settings.capture_source == "VIEW" and _find_view3d_context(context.window) is None:
+        if _find_view3d_context(context.window) is None:
             self.report({"ERROR"}, "Open a 3D View before starting capture")
-            return {"CANCELLED"}
-
-        if settings.capture_source == "CAMERA":
-            _ensure_capture_camera_default(context, settings)
-
-        if settings.capture_source == "CAMERA" and _selected_capture_camera(context, settings) is None:
-            self.report({"ERROR"}, "Scene Camera capture requires a selected camera")
             return {"CANCELLED"}
 
         root_value = settings.output_root or (prefs.default_output_root if prefs else "//timelapse_sessions")
@@ -611,13 +536,6 @@ class SCT_OT_start_capture(Operator):
             settings.status = "No 3D View found"
             return
 
-        capture_camera = None
-        if settings.capture_source == "CAMERA":
-            capture_camera = _selected_capture_camera(context, settings)
-        if settings.capture_source == "CAMERA" and capture_camera is None:
-            settings.status = "No timelapse camera selected"
-            return
-
         frame_number = settings.frame_count + 1
         image_format = _image_format_for_quality(settings.image_quality)
         jpeg_quality = _jpeg_quality_for_quality(settings.image_quality)
@@ -625,18 +543,11 @@ class SCT_OT_start_capture(Operator):
         filepath = os.path.join(settings.session_dir, f"frame_{frame_number:06d}{extension}")
 
         area, region, space = view_context
-        region_3d = space.region_3d
-        previous_scene_camera = context.scene.camera
         previous_overlays = space.overlay.show_overlays
-        previous_view = _snapshot_region_view(region_3d)
 
         try:
             if settings.hide_overlays:
                 space.overlay.show_overlays = False
-
-            if settings.capture_source == "CAMERA":
-                context.scene.camera = capture_camera
-                region_3d.view_perspective = "CAMERA"
 
             _flush_viewport_updates(context, area)
             _save_viewport_screenshot(context, area, region, filepath, image_format, jpeg_quality)
@@ -648,8 +559,6 @@ class SCT_OT_start_capture(Operator):
             settings.status = f"Capture failed: {exc}"
             self.report({"ERROR"}, settings.status)
         finally:
-            context.scene.camera = previous_scene_camera
-            _restore_region_view(region_3d, previous_view)
             space.overlay.show_overlays = previous_overlays
             _tag_view3d_redraw(area)
 
@@ -692,9 +601,6 @@ class SCT_PT_panel(Panel):
         layout.separator()
         layout.prop(settings, "interval_seconds")
         layout.prop(settings, "image_quality")
-        layout.prop(settings, "capture_source")
-        if settings.capture_source == "CAMERA":
-            layout.prop(settings, "capture_camera")
         layout.prop(settings, "hide_overlays")
         layout.prop(settings, "pause_while_idle")
         if settings.pause_while_idle:

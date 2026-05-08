@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.0
+
+- Removed Scene Camera capture and camera picker.
+- Simplified capture to always use the active 3D View.
+- Documented the separate-window workflow for fixed-perspective timelapses.
+
 ## 0.4.4
 
 - Fixed live viewport capture restore errors caused by Blender camera offset array properties.
