@@ -134,6 +134,8 @@ def _session_metadata(context, settings, ended_at=None):
         "image_quality_label": _image_quality_label(settings.image_quality),
         "file_extension": extension,
         "jpeg_quality": jpeg_quality,
+        "defer_during_input": settings.defer_during_input,
+        "input_settle_seconds": settings.input_settle_seconds,
         "pause_while_idle": settings.pause_while_idle,
         "idle_threshold_seconds": settings.idle_threshold_seconds,
         "skipped_idle_captures": settings.skipped_idle_captures,
@@ -223,6 +225,14 @@ def _is_activity_event(event):
     return False
 
 
+def _is_input_start_event(event):
+    return getattr(event, "value", None) in {"PRESS", "CLICK", "DOUBLE_CLICK", "CLICK_DRAG"}
+
+
+def _is_input_end_event(event):
+    return getattr(event, "value", None) == "RELEASE"
+
+
 class SCT_AddonPreferences(AddonPreferences):
     bl_idname = ADDON_ID
 
@@ -255,6 +265,19 @@ class SCT_AddonPreferences(AddonPreferences):
         description="Skip captures when no Blender input has been seen recently",
         default=True,
     )
+    default_defer_during_input: BoolProperty(
+        name="Defer During Input",
+        description="Wait until sculpt/navigation input settles before capturing",
+        default=True,
+    )
+    default_input_settle_seconds: FloatProperty(
+        name="Input Settle",
+        description="Seconds to wait after recent input before capturing",
+        default=1.0,
+        min=0.0,
+        soft_max=5.0,
+        unit="TIME",
+    )
     default_idle_threshold_seconds: FloatProperty(
         name="Idle After",
         description="Seconds of no Blender input before capture pauses",
@@ -281,6 +304,9 @@ class SCT_AddonPreferences(AddonPreferences):
         layout.prop(self, "default_output_root")
         layout.prop(self, "default_interval_seconds")
         layout.prop(self, "default_image_quality")
+        layout.prop(self, "default_defer_during_input")
+        if self.default_defer_during_input:
+            layout.prop(self, "default_input_settle_seconds")
         layout.prop(self, "default_pause_while_idle")
         if self.default_pause_while_idle:
             layout.prop(self, "default_idle_threshold_seconds")
@@ -327,6 +353,19 @@ class SCT_Settings(PropertyGroup):
         name="Pause While Idle",
         description="Skip captures when no Blender input has been seen recently",
         default=True,
+    )
+    defer_during_input: BoolProperty(
+        name="Defer During Input",
+        description="Wait until sculpt/navigation input settles before capturing",
+        default=True,
+    )
+    input_settle_seconds: FloatProperty(
+        name="Input Settle",
+        description="Seconds to wait after recent input before capturing",
+        default=1.0,
+        min=0.0,
+        soft_max=5.0,
+        unit="TIME",
     )
     idle_threshold_seconds: FloatProperty(
         name="Idle After",
@@ -387,6 +426,8 @@ class SCT_OT_apply_preferences_defaults(Operator):
         settings.output_root = prefs.default_output_root
         settings.interval_seconds = prefs.default_interval_seconds
         settings.image_quality = prefs.default_image_quality
+        settings.defer_during_input = prefs.default_defer_during_input
+        settings.input_settle_seconds = prefs.default_input_settle_seconds
         settings.pause_while_idle = prefs.default_pause_while_idle
         settings.idle_threshold_seconds = prefs.default_idle_threshold_seconds
         settings.recommended_fps = prefs.default_recommended_fps
@@ -403,6 +444,7 @@ class SCT_OT_start_capture(Operator):
     _timer = None
     _next_capture = 0.0
     _last_activity = 0.0
+    _input_active = False
     _was_idle = False
 
     def invoke(self, context, event):
@@ -456,6 +498,7 @@ class SCT_OT_start_capture(Operator):
 
         self._next_capture = 0.0
         self._last_activity = time.monotonic()
+        self._input_active = False
         self._was_idle = False
         self._timer = context.window_manager.event_timer_add(1.0, window=context.window)
         context.window_manager.modal_handler_add(self)
@@ -471,6 +514,10 @@ class SCT_OT_start_capture(Operator):
         if event.type != "TIMER":
             if _is_activity_event(event):
                 self._last_activity = time.monotonic()
+                if _is_input_start_event(event):
+                    self._input_active = True
+                elif _is_input_end_event(event):
+                    self._input_active = False
                 if self._was_idle:
                     self._next_capture = 0.0
                     self._was_idle = False
@@ -479,6 +526,14 @@ class SCT_OT_start_capture(Operator):
 
         now = time.monotonic()
         if now >= self._next_capture:
+            seconds_since_input = now - self._last_activity
+            if settings.defer_during_input and (
+                self._input_active or seconds_since_input < settings.input_settle_seconds
+            ):
+                settings.status = "Waiting for input pause"
+                self._next_capture = now + 0.5
+                return {"PASS_THROUGH"}
+
             if settings.pause_while_idle and now - self._last_activity >= settings.idle_threshold_seconds:
                 settings.skipped_idle_captures += 1
                 settings.status = "Idle; capture paused"
@@ -567,6 +622,9 @@ class SCT_PT_panel(Panel):
         layout.separator()
         layout.prop(settings, "interval_seconds")
         layout.prop(settings, "image_quality")
+        layout.prop(settings, "defer_during_input")
+        if settings.defer_during_input:
+            layout.prop(settings, "input_settle_seconds")
         layout.prop(settings, "pause_while_idle")
         if settings.pause_while_idle:
             layout.prop(settings, "idle_threshold_seconds")

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.2
+
+- Added input-settle deferral so captures wait until sculpt/navigation input pauses.
+- Reduced risk of interrupting active strokes and viewport rotation during timed capture.
+
 ## 0.5.1
 
 - Reduced capture disruption by removing temporary overlay changes and forced viewport redraw swaps.
