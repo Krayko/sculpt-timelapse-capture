@@ -28,7 +28,7 @@ timelapse_sessions/
 6. Use the **Timelapse** tab to set the project, session name, root folder, interval, and image format.
 7. Click **Start Capture** before sculpting and **Stop Capture** when finished.
 
-Use the release asset named like `sculpt_timelapse_capture-0.4.2.zip`. Do not use GitHub's green **Code > Download ZIP** button for installation; that downloads the source repository, not the packaged Blender extension.
+Use the release asset named like `sculpt_timelapse_capture-0.4.3.zip`. Do not use GitHub's green **Code > Download ZIP** button for installation; that downloads the source repository, not the packaged Blender extension.
 
 Project and Session are prefilled with contextual defaults. Project uses the current `.blend` file name when available, and Session defaults to `sculpt_session`.
 
@@ -44,6 +44,8 @@ Capture Source controls what gets saved:
 - `Scene Camera` captures from the camera selected in the Sculpt Timelapse panel.
 
 When Scene Camera is selected, the Camera picker defaults to Blender's active scene camera when possible. The selected camera is checked on every frame, so it can be changed mid-session.
+
+Frames are captured from the live 3D View viewport so Sculpt Mode progress is reflected in the saved images. Scene Camera capture temporarily switches the viewport to the selected camera for the frame, then restores the user's previous view.
 
 Pause While Idle is enabled by default. If Blender receives no input for 30 seconds, capture pauses and resumes after new input.
 

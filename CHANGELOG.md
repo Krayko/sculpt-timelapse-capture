@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.3
+
+- Changed frame capture to use live 3D View screenshots instead of OpenGL scene renders.
+- Scene Camera capture now temporarily switches the 3D View to the selected camera before capturing.
+
 ## 0.4.2
 
 - Added a Sculpt Timelapse camera picker for Scene Camera capture.

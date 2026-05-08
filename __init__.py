@@ -4,6 +4,7 @@ import os
 import re
 import shutil
 import time
+import uuid
 from pathlib import Path
 
 import bpy
@@ -129,6 +130,7 @@ def _session_metadata(context, settings, ended_at=None):
         "interval_seconds": settings.interval_seconds,
         "capture_source": settings.capture_source,
         "capture_camera": settings.capture_camera.name if settings.capture_camera else None,
+        "capture_method": "viewport_screenshot",
         "image_format": image_format,
         "image_quality": settings.image_quality,
         "image_quality_label": _image_quality_label(settings.image_quality),
@@ -177,6 +179,75 @@ def _find_view3d_context(window):
             return area, region, space
 
     return None
+
+
+def _tag_view3d_redraw(area):
+    if area:
+        area.tag_redraw()
+    for window in bpy.context.window_manager.windows:
+        for screen_area in window.screen.areas:
+            if screen_area.type == "VIEW_3D":
+                screen_area.tag_redraw()
+
+
+def _flush_viewport_updates(context, area):
+    context.view_layer.update()
+    _tag_view3d_redraw(area)
+    try:
+        bpy.ops.wm.redraw_timer(type="DRAW_WIN_SWAP", iterations=1)
+    except RuntimeError:
+        pass
+
+
+def _snapshot_region_view(region_3d):
+    return {
+        "view_perspective": region_3d.view_perspective,
+        "view_location": region_3d.view_location.copy(),
+        "view_rotation": region_3d.view_rotation.copy(),
+        "view_distance": region_3d.view_distance,
+        "view_camera_zoom": region_3d.view_camera_zoom,
+        "view_camera_offset": region_3d.view_camera_offset.copy(),
+    }
+
+
+def _restore_region_view(region_3d, snapshot):
+    region_3d.view_perspective = snapshot["view_perspective"]
+    region_3d.view_location = snapshot["view_location"]
+    region_3d.view_rotation = snapshot["view_rotation"]
+    region_3d.view_distance = snapshot["view_distance"]
+    region_3d.view_camera_zoom = snapshot["view_camera_zoom"]
+    region_3d.view_camera_offset = snapshot["view_camera_offset"]
+
+
+def _save_viewport_screenshot(context, area, region, filepath, image_format, jpeg_quality):
+    filepath = Path(filepath)
+    temp_filepath = filepath.with_name(f".{filepath.stem}_{uuid.uuid4().hex}.png")
+
+    with context.temp_override(window=context.window, screen=context.screen, area=area, region=region):
+        bpy.ops.screen.screenshot(filepath=str(temp_filepath), hide_props_region=True, check_existing=False)
+
+    if image_format == "PNG":
+        temp_filepath.replace(filepath)
+        return
+
+    image = bpy.data.images.load(str(temp_filepath), check_existing=False)
+    image_settings = context.scene.render.image_settings
+    previous_format = image_settings.file_format
+    previous_quality = image_settings.quality
+
+    try:
+        image_settings.file_format = image_format
+        if jpeg_quality is not None:
+            image_settings.quality = jpeg_quality
+        image.save_render(str(filepath), scene=context.scene)
+    finally:
+        bpy.data.images.remove(image)
+        image_settings.file_format = previous_format
+        image_settings.quality = previous_quality
+        try:
+            temp_filepath.unlink()
+        except OSError:
+            pass
 
 
 def _is_activity_event(event):
@@ -534,12 +605,11 @@ class SCT_OT_start_capture(Operator):
 
     def _capture_frame(self, context):
         settings = context.scene.sct_settings
-        view_context = None
-        if settings.capture_source == "VIEW":
-            view_context = _find_view3d_context(context.window)
-            if view_context is None:
-                settings.status = "No 3D View found"
-                return
+        view_context = _find_view3d_context(context.window)
+        if view_context is None:
+            settings.status = "No 3D View found"
+            return
+
         capture_camera = None
         if settings.capture_source == "CAMERA":
             capture_camera = _selected_capture_camera(context, settings)
@@ -553,32 +623,22 @@ class SCT_OT_start_capture(Operator):
         extension = _extension_for_format(image_format)
         filepath = os.path.join(settings.session_dir, f"frame_{frame_number:06d}{extension}")
 
-        render = context.scene.render
-        image_settings = render.image_settings
-        previous_filepath = render.filepath
-        previous_format = image_settings.file_format
-        previous_quality = image_settings.quality
+        area, region, space = view_context
+        region_3d = space.region_3d
         previous_scene_camera = context.scene.camera
-        previous_overlays = None
+        previous_overlays = space.overlay.show_overlays
+        previous_view = _snapshot_region_view(region_3d)
 
         try:
-            render.filepath = filepath
-            image_settings.file_format = image_format
-            if image_format == "JPEG" and jpeg_quality is not None:
-                image_settings.quality = jpeg_quality
+            if settings.hide_overlays:
+                space.overlay.show_overlays = False
 
-            if settings.capture_source == "VIEW":
-                area, region, space = view_context
-                previous_overlays = space.overlay.show_overlays
-
-                if settings.hide_overlays:
-                    space.overlay.show_overlays = False
-
-                with context.temp_override(window=context.window, screen=context.screen, area=area, region=region):
-                    bpy.ops.render.opengl(write_still=True, view_context=True)
-            else:
+            if settings.capture_source == "CAMERA":
                 context.scene.camera = capture_camera
-                bpy.ops.render.opengl(write_still=True, view_context=False)
+                region_3d.view_perspective = "CAMERA"
+
+            _flush_viewport_updates(context, area)
+            _save_viewport_screenshot(context, area, region, filepath, image_format, jpeg_quality)
 
             settings.frame_count = frame_number
             settings.status = f"Captured {frame_number} frame{'s' if frame_number != 1 else ''}"
@@ -587,12 +647,10 @@ class SCT_OT_start_capture(Operator):
             settings.status = f"Capture failed: {exc}"
             self.report({"ERROR"}, settings.status)
         finally:
-            render.filepath = previous_filepath
-            image_settings.file_format = previous_format
-            image_settings.quality = previous_quality
             context.scene.camera = previous_scene_camera
-            if settings.capture_source == "VIEW" and previous_overlays is not None:
-                space.overlay.show_overlays = previous_overlays
+            _restore_region_view(region_3d, previous_view)
+            space.overlay.show_overlays = previous_overlays
+            _tag_view3d_redraw(area)
 
 
 class SCT_OT_stop_capture(Operator):
