@@ -12,7 +12,6 @@ from bpy.types import AddonPreferences, Operator, Panel, PropertyGroup
 
 
 ADDON_ID = __package__ or __name__
-_ACTIVE_CAPTURE = None
 
 
 def _resolved_path(path_value):
@@ -285,15 +284,12 @@ class SCT_OT_start_capture(Operator):
 
     _timer = None
     _next_capture = 0.0
-    _stop_requested = False
 
     def invoke(self, context, event):
-        global _ACTIVE_CAPTURE
-
         settings = context.scene.sct_settings
         prefs = _addon_preferences(context)
 
-        if settings.is_running or _ACTIVE_CAPTURE is not None:
+        if settings.is_running:
             self.report({"WARNING"}, "Timelapse capture is already running")
             return {"CANCELLED"}
 
@@ -337,16 +333,14 @@ class SCT_OT_start_capture(Operator):
             settings.is_running = False
             return {"CANCELLED"}
 
-        self._stop_requested = False
         self._next_capture = 0.0
         self._timer = context.window_manager.event_timer_add(1.0, window=context.window)
         context.window_manager.modal_handler_add(self)
-        _ACTIVE_CAPTURE = self
 
         return {"RUNNING_MODAL"}
 
     def modal(self, context, event):
-        if self._stop_requested or not context.scene.sct_settings.is_running:
+        if not context.scene.sct_settings.is_running:
             self._finish(context)
             return {"CANCELLED"}
 
@@ -360,14 +354,7 @@ class SCT_OT_start_capture(Operator):
 
         return {"PASS_THROUGH"}
 
-    def request_stop(self, context):
-        self._stop_requested = True
-        if context is not None:
-            self._finish(context)
-
     def _finish(self, context):
-        global _ACTIVE_CAPTURE
-
         if self._timer is not None:
             context.window_manager.event_timer_remove(self._timer)
             self._timer = None
@@ -376,9 +363,6 @@ class SCT_OT_start_capture(Operator):
         settings.is_running = False
         settings.status = "Stopped"
         _write_session_metadata(context, settings, ended_at=_now_iso())
-
-        if _ACTIVE_CAPTURE is self:
-            _ACTIVE_CAPTURE = None
 
     def _capture_frame(self, context):
         settings = context.scene.sct_settings
@@ -431,16 +415,11 @@ class SCT_OT_stop_capture(Operator):
     bl_options = {"REGISTER"}
 
     def execute(self, context):
-        global _ACTIVE_CAPTURE
-
         settings = context.scene.sct_settings
-        if _ACTIVE_CAPTURE is not None:
-            _ACTIVE_CAPTURE.request_stop(context)
-        else:
-            settings.is_running = False
-            settings.status = "Stopped"
-            if settings.session_dir:
-                _write_session_metadata(context, settings, ended_at=_now_iso())
+        settings.is_running = False
+        settings.status = "Stopping" if settings.session_dir else "Stopped"
+        if settings.session_dir:
+            _write_session_metadata(context, settings, ended_at=_now_iso())
 
         return {"FINISHED"}
 
@@ -506,12 +485,11 @@ def register():
 
 
 def unregister():
-    global _ACTIVE_CAPTURE
+    for scene in bpy.data.scenes:
+        if hasattr(scene, "sct_settings"):
+            scene.sct_settings.is_running = False
 
-    if _ACTIVE_CAPTURE is not None:
-        _ACTIVE_CAPTURE._stop_requested = True
-        _ACTIVE_CAPTURE = None
-
-    del bpy.types.Scene.sct_settings
+    if hasattr(bpy.types.Scene, "sct_settings"):
+        del bpy.types.Scene.sct_settings
     for cls in reversed(classes):
         bpy.utils.unregister_class(cls)

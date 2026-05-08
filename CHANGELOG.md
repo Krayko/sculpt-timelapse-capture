@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.2
+
+- Fixed stale operator references after Blender removes modal operator RNA data.
+
 ## 0.3.1
 
 - Fixed Blender 5.1 modal timer compatibility when `Event.timer` is unavailable.
