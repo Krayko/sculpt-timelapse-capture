@@ -28,7 +28,7 @@ timelapse_sessions/
 6. Use the **Timelapse** tab to set the project, session name, root folder, interval, and image format.
 7. Click **Start Capture** before sculpting and **Stop Capture** when finished.
 
-Use the release asset named like `sculpt_timelapse_capture-0.4.0.zip`. Do not use GitHub's green **Code > Download ZIP** button for installation; that downloads the source repository, not the packaged Blender extension.
+Use the release asset named like `sculpt_timelapse_capture-0.4.1.zip`. Do not use GitHub's green **Code > Download ZIP** button for installation; that downloads the source repository, not the packaged Blender extension.
 
 Project and Session are prefilled with contextual defaults. Project uses the current `.blend` file name when available, and Session defaults to `sculpt_session`.
 

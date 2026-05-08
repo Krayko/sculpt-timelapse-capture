@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.1
+
+- Fixed add-on enable errors caused by reading scene data during Blender's restricted registration context.
+
 ## 0.4.0
 
 - Added idle-aware capture pause with a 30 second default threshold.

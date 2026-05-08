@@ -84,6 +84,30 @@ def _ensure_session_defaults(settings):
         settings.session_name = "sculpt_session"
 
 
+def _initialize_scene_defaults():
+    try:
+        scenes = list(bpy.data.scenes)
+    except AttributeError:
+        return 0.1
+
+    for scene in scenes:
+        if hasattr(scene, "sct_settings"):
+            _ensure_session_defaults(scene.sct_settings)
+
+    return None
+
+
+def _stop_running_captures():
+    try:
+        scenes = list(bpy.data.scenes)
+    except AttributeError:
+        return
+
+    for scene in scenes:
+        if hasattr(scene, "sct_settings"):
+            scene.sct_settings.is_running = False
+
+
 def _session_metadata(context, settings, ended_at=None):
     image_format = _image_format_for_quality(settings.image_quality)
     jpeg_quality = _jpeg_quality_for_quality(settings.image_quality)
@@ -612,14 +636,15 @@ def register():
     for cls in classes:
         bpy.utils.register_class(cls)
     bpy.types.Scene.sct_settings = PointerProperty(type=SCT_Settings)
-    for scene in bpy.data.scenes:
-        _ensure_session_defaults(scene.sct_settings)
+    if not bpy.app.timers.is_registered(_initialize_scene_defaults):
+        bpy.app.timers.register(_initialize_scene_defaults, first_interval=0.1)
 
 
 def unregister():
-    for scene in bpy.data.scenes:
-        if hasattr(scene, "sct_settings"):
-            scene.sct_settings.is_running = False
+    if bpy.app.timers.is_registered(_initialize_scene_defaults):
+        bpy.app.timers.unregister(_initialize_scene_defaults)
+
+    _stop_running_captures()
 
     if hasattr(bpy.types.Scene, "sct_settings"):
         del bpy.types.Scene.sct_settings
