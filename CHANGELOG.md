@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.4
+
+- Flush live Blender edits before each OpenGL viewport capture.
+- Force redraw of the Timelapse UI after frame count and idle skip updates.
+
 ## 0.5.3
 
 - Restored the reliable 0.3.1 OpenGL viewport frame capture method.

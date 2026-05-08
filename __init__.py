@@ -128,6 +128,7 @@ def _session_metadata(context, settings, ended_at=None):
         "frame_count": settings.frame_count,
         "interval_seconds": settings.interval_seconds,
         "capture_method": "opengl_view_context",
+        "flush_edits_before_capture": True,
         "image_format": image_format,
         "image_quality": settings.image_quality,
         "image_quality_label": _image_quality_label(settings.image_quality),
@@ -175,6 +176,27 @@ def _find_view3d_context(window):
             return area, region, space
 
     return None
+
+
+def _tag_ui_redraw(context):
+    screen = context.screen
+    if screen is None:
+        return
+
+    for area in screen.areas:
+        if area.type == "VIEW_3D":
+            area.tag_redraw()
+
+
+def _sync_live_edits(context, area, region):
+    try:
+        with context.temp_override(window=context.window, screen=context.screen, area=area, region=region):
+            bpy.ops.ed.flush_edits()
+    except RuntimeError:
+        pass
+
+    context.view_layer.update()
+    area.tag_redraw()
 
 
 def _is_activity_event(event):
@@ -449,6 +471,7 @@ class SCT_OT_start_capture(Operator):
                 self._was_idle = True
                 self._next_capture = now + settings.interval_seconds
                 _write_session_metadata(context, settings)
+                _tag_ui_redraw(context)
                 return {"PASS_THROUGH"}
 
             self._capture_frame(context)
@@ -492,15 +515,18 @@ class SCT_OT_start_capture(Operator):
             if image_format == "JPEG" and jpeg_quality is not None:
                 image_settings.quality = jpeg_quality
 
+            _sync_live_edits(context, area, region)
             with context.temp_override(window=context.window, screen=context.screen, area=area, region=region):
                 bpy.ops.render.opengl(write_still=True, view_context=True)
 
             settings.frame_count = frame_number
             settings.status = f"Captured {frame_number} frame{'s' if frame_number != 1 else ''}"
             _write_session_metadata(context, settings)
+            _tag_ui_redraw(context)
         except Exception as exc:
             settings.status = f"Capture failed: {exc}"
             self.report({"ERROR"}, settings.status)
+            _tag_ui_redraw(context)
         finally:
             render.filepath = previous_filepath
             image_settings.file_format = previous_format
