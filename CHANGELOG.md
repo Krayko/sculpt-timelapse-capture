@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.2
+
+- Added a Sculpt Timelapse camera picker for Scene Camera capture.
+- Scene Camera capture now uses the selected camera each frame, allowing mid-session camera changes.
+
 ## 0.4.1
 
 - Fixed add-on enable errors caused by reading scene data during Blender's restricted registration context.
