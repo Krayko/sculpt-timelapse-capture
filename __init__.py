@@ -134,7 +134,6 @@ def _session_metadata(context, settings, ended_at=None):
         "image_quality_label": _image_quality_label(settings.image_quality),
         "file_extension": extension,
         "jpeg_quality": jpeg_quality,
-        "hide_overlays": settings.hide_overlays,
         "pause_while_idle": settings.pause_while_idle,
         "idle_threshold_seconds": settings.idle_threshold_seconds,
         "skipped_idle_captures": settings.skipped_idle_captures,
@@ -179,22 +178,8 @@ def _find_view3d_context(window):
     return None
 
 
-def _tag_view3d_redraw(area):
-    if area:
-        area.tag_redraw()
-    for window in bpy.context.window_manager.windows:
-        for screen_area in window.screen.areas:
-            if screen_area.type == "VIEW_3D":
-                screen_area.tag_redraw()
-
-
-def _flush_viewport_updates(context, area):
+def _flush_viewport_updates(context):
     context.view_layer.update()
-    _tag_view3d_redraw(area)
-    try:
-        bpy.ops.wm.redraw_timer(type="DRAW_WIN_SWAP", iterations=1)
-    except RuntimeError:
-        pass
 
 
 def _save_viewport_screenshot(context, area, region, filepath, image_format, jpeg_quality):
@@ -265,11 +250,6 @@ class SCT_AddonPreferences(AddonPreferences):
         ),
         default="JPG_90",
     )
-    default_hide_overlays: BoolProperty(
-        name="Hide Overlays by Default",
-        description="Temporarily hide viewport overlays while each frame is captured",
-        default=True,
-    )
     default_pause_while_idle: BoolProperty(
         name="Pause While Idle",
         description="Skip captures when no Blender input has been seen recently",
@@ -301,7 +281,6 @@ class SCT_AddonPreferences(AddonPreferences):
         layout.prop(self, "default_output_root")
         layout.prop(self, "default_interval_seconds")
         layout.prop(self, "default_image_quality")
-        layout.prop(self, "default_hide_overlays")
         layout.prop(self, "default_pause_while_idle")
         if self.default_pause_while_idle:
             layout.prop(self, "default_idle_threshold_seconds")
@@ -343,11 +322,6 @@ class SCT_Settings(PropertyGroup):
             ("PNG", "PNG", "Lossless frames with larger files"),
         ),
         default="JPG_90",
-    )
-    hide_overlays: BoolProperty(
-        name="Hide Overlays",
-        description="Temporarily hide viewport overlays while each frame is captured",
-        default=True,
     )
     pause_while_idle: BoolProperty(
         name="Pause While Idle",
@@ -413,7 +387,6 @@ class SCT_OT_apply_preferences_defaults(Operator):
         settings.output_root = prefs.default_output_root
         settings.interval_seconds = prefs.default_interval_seconds
         settings.image_quality = prefs.default_image_quality
-        settings.hide_overlays = prefs.default_hide_overlays
         settings.pause_while_idle = prefs.default_pause_while_idle
         settings.idle_threshold_seconds = prefs.default_idle_threshold_seconds
         settings.recommended_fps = prefs.default_recommended_fps
@@ -542,14 +515,10 @@ class SCT_OT_start_capture(Operator):
         extension = _extension_for_format(image_format)
         filepath = os.path.join(settings.session_dir, f"frame_{frame_number:06d}{extension}")
 
-        area, region, space = view_context
-        previous_overlays = space.overlay.show_overlays
+        area, region, _space = view_context
 
         try:
-            if settings.hide_overlays:
-                space.overlay.show_overlays = False
-
-            _flush_viewport_updates(context, area)
+            _flush_viewport_updates(context)
             _save_viewport_screenshot(context, area, region, filepath, image_format, jpeg_quality)
 
             settings.frame_count = frame_number
@@ -558,9 +527,6 @@ class SCT_OT_start_capture(Operator):
         except Exception as exc:
             settings.status = f"Capture failed: {exc}"
             self.report({"ERROR"}, settings.status)
-        finally:
-            space.overlay.show_overlays = previous_overlays
-            _tag_view3d_redraw(area)
 
 
 class SCT_OT_stop_capture(Operator):
@@ -601,7 +567,6 @@ class SCT_PT_panel(Panel):
         layout.separator()
         layout.prop(settings, "interval_seconds")
         layout.prop(settings, "image_quality")
-        layout.prop(settings, "hide_overlays")
         layout.prop(settings, "pause_while_idle")
         if settings.pause_while_idle:
             layout.prop(settings, "idle_threshold_seconds")

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.1
+
+- Reduced capture disruption by removing temporary overlay changes and forced viewport redraw swaps.
+- Captures now preserve the active 3D View's current overlay and UI state.
+
 ## 0.5.0
 
 - Removed Scene Camera capture and camera picker.
